@@ -87,27 +87,60 @@ services:
       - 8888:8888
       - 8080:8080
 
+  # JOB ETL: POSTGRES → MINIO raw/ (chạy 1 lần rồi dừng)
+  spark-raw-job:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-raw-job
+    entrypoint: ["/bin/bash", "-c"]
+    networks:
+      - iceberg_net
+    depends_on:
+      - minio
+      - postgres-source
+    volumes:
+      - ../spark_jobs:/opt/spark_jobs
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_REGION=us-east-1
+      - MINIO_ENDPOINT=http://minio:9000
+      - PG_HOST=postgres-source
+      - PG_PORT=5432
+      - PG_DB=${DB_SOURCE_NAME}
+      - PG_USER=${DB_SOURCE_USER}
+      - PG_PASSWORD=${DB_SOURCE_PASSWORD}
+    command:
+      - |
+        echo '>>> [spark-raw-job] Chờ MinIO và Postgres sẵn sàng (20s)...';
+        sleep 20;
+        spark-submit \
+          --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.postgresql:postgresql:42.6.0 \
+          /opt/spark_jobs/postgres_to_raw.py
+
   # JOB TỰ ĐỘNG INGESTION BRONZE (Sẽ tự động stop sau khi xong)
   spark-bronze-job:
     image: tabulario/spark-iceberg:latest
     container_name: spark-bronze-job
+    entrypoint: ["/bin/bash", "-c"]
     networks:
       - iceberg_net
     depends_on:
       - hive-metastore
       - spark-iceberg
+      - spark-raw-job
     volumes:
       - ./notebooks:/home/iceberg/notebooks/notebooks
     environment:
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
       - AWS_REGION=us-east-1
-    command: >
-      bash -c "
-      echo 'Chờ hệ thống ổn định 15 giây...';
-      sleep 15;
-      spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 /home/iceberg/notebooks/notebooks/bronze_ingestion.py
-      "
+    command:
+      - |
+        echo '>>> [spark-bronze-job] Chờ hệ thống ổn định 15 giây...';
+        sleep 15;
+        spark-submit \
+          --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
+          /home/iceberg/notebooks/notebooks/bronze_ingestion.py
 
   # --- TRUY VẤN DỮ LIỆU (TRINO) ---
   trino:
@@ -120,12 +153,12 @@ services:
     volumes:
       - ./trino/catalog:/etc/trino/catalog
     environment:
-      # Giảm xuống 512M để nó nhẹ nhất có thể
-      - TRINO_JVM_MAX_HEAP_SIZE=512M
+      # Tăng RAM để Trino chạy ổn định
+      - TRINO_JVM_MAX_HEAP_SIZE=1G
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
 
   # --- ĐIỀU PHỐI (AIRFLOW) ---
   airflow:
