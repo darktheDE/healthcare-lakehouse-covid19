@@ -18,15 +18,15 @@
    git pull origin develop
    
     # Bước 2: Start nền tảng Lakehouse với .env (Gồm MinIO, Metastore, Trino, Airflow)
-    docker-compose --env-file .env -f deploy/docker-compose.yml up -d
+    docker compose --env-file .env -f deploy/docker-compose.yml up -d
     ```
 3. Chạy các tiến trình nạp dữ liệu (Ingestion):
    ```bash
    # Chạy nạp dữ liệu từ Postgres vào Raw (Parquet)
-   docker-compose --env-file .env -f deploy/docker-compose.yml up spark-raw-job
+   docker compose --env-file .env -f deploy/docker-compose.yml up spark-raw-job
 
    # Chạy nạp dữ liệu từ Raw vào Bronze (Iceberg)
-   docker-compose --env-file .env -f deploy/docker-compose.yml up spark-bronze-job
+   docker compose --env-file .env -f deploy/docker-compose.yml up spark-bronze-job
    ```
 4. Truy cập các công cụ:
    - **MinIO Console:** `http://localhost:9001` (User: admin)
@@ -34,7 +34,7 @@
    - **Trino CLI:** `docker exec -it trino trino`
 5. Dừng các dịch vụ:
    ```bash
-   docker-compose -f deploy/docker-compose.yml down
+   docker compose -f deploy/docker-compose.yml down
    ```
 
 ## 2. Quy trình phát triển (Agile/Scrum với Plane.so)
