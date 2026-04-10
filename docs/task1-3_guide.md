@@ -17,7 +17,7 @@ Tài liệu này trình bày cả hai phương pháp để thiết lập Storage
 
 ### Bước 3: Sinh Access Key từ công cụ dòng lệnh 
 *(Ghi chú: MinIO Community Edition thường ẩn giao diện Settings Access Key. Ta cần sinh Key qua công cụ dòng lệnh được tích hợp).*
-Mở Powershell trên máy (Windows host) và chạy trình tự:
+Mở Powershell trên máy (Windows host) và chạy trình tự (Thay `admin` `password` bằng giá trị trong `.env` nếu bạn có thay đổi):
 ```bash
 docker exec minio mc alias set minio http://localhost:9000 admin password
 docker exec minio mc admin user svcacct add minio admin
@@ -38,7 +38,7 @@ Môi trường `docker-compose.yml` của dự án đã được tuỳ biến Co
 ### Bước 1: Chỉ cần gọi Startup
 Khi bật hệ thống lên bằng lệnh:
 ```bash
-docker-compose -f deploy/docker-compose.yml up -d
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 Container `mc` đính kèm sẽ tự thực thi:
 1. Kết nối vào backend `minio:9000`.

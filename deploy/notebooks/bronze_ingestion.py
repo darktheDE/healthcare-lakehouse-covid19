@@ -1,4 +1,10 @@
+import os
 from pyspark.sql import SparkSession
+
+# CONFIG from environment variables
+MINIO_ENDPOINT   = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "lakehouse_admin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "Lakehouse123!")
 
 def main():
     print("🚀 Bắt đầu khởi tạo SparkSession...")
@@ -10,9 +16,9 @@ def main():
         .config("spark.sql.catalog.hospital.uri", "thrift://hive-metastore:9083") \
         .config("spark.sql.catalog.hospital.warehouse", "s3a://hospital-lakehouse/") \
         .config("spark.sql.catalog.hospital.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-        .config("spark.hadoop.fs.s3a.access.key", "lakehouse_admin") \
-        .config("spark.hadoop.fs.s3a.secret.key", "Lakehouse123!") \
+        .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT) \
+        .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY) \
+        .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY) \
         .config("spark.hadoop.fs.s3a.path.style.access", "true") \
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
