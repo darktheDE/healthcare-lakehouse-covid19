@@ -4,25 +4,28 @@ services:
     image: postgres:15
     container_name: postgres-source
     environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=hospital_db
+      - POSTGRES_USER=${DB_SOURCE_USER}
+      - POSTGRES_PASSWORD=${DB_SOURCE_PASSWORD}
+      - POSTGRES_DB=${DB_SOURCE_NAME}
     networks:
       - iceberg_net
     ports:
       - "5432:5432"
+    volumes:
+      - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../data:/data_source
 
   metastore-db:
     image: postgres:15
     container_name: metastore-db
     environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=metastore_db
+      - POSTGRES_USER=${DB_METASTORE_USER}
+      - POSTGRES_PASSWORD=${DB_METASTORE_PASSWORD}
+      - POSTGRES_DB=${DB_METASTORE_NAME}
     networks:
       - iceberg_net
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "admin", "-d", "metastore_db" ]
+      test: [ "CMD", "pg_isready", "-U", "${DB_METASTORE_USER}", "-d", "${DB_METASTORE_NAME}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,18 +40,18 @@ services:
       # Database Config
       - DATABASE_HOST=metastore-db
       - DATABASE_PORT=5432
-      - DATABASE_DB=metastore_db
-      - DATABASE_USER=admin
-      - DATABASE_PASSWORD=password
+      - DATABASE_DB=${DB_METASTORE_NAME}
+      - DATABASE_USER=${DB_METASTORE_USER}
+      - DATABASE_PASSWORD=${DB_METASTORE_PASSWORD}
       - DATABASE_TYPE=postgres
 
-      # S3 / MinIO Config (Đúng tên biến script đòi ở dòng 37, 61...)
+      # S3 / MinIO Config
       - S3_BUCKET=warehouse
       - S3_PREFIX=iceberg
       - S3_REGION=us-east-1
       - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=admin
-      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
 
       # Thêm cái này để chắc chắn script không đòi thêm
       - AWS_S3_ENDPOINT=http://minio:9000
@@ -70,8 +73,8 @@ services:
       - ./warehouse:/home/iceberg/warehouse
       - ./notebooks:/home/iceberg/notebooks/notebooks
     environment:
-      - AWS_ACCESS_KEY_ID=admin
-      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
       - AWS_REGION=us-east-1
       # Cấu hình để Spark ghi vào Hive Catalog thay vì REST
       - SPARK_CONF_spark_sql_catalog_demo=org.apache.iceberg.spark.SparkCatalog
@@ -110,7 +113,7 @@ services:
       - postgres-source
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://admin:password@postgres-source:5432/hospital_db
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${DB_SOURCE_USER}:${DB_SOURCE_PASSWORD}@postgres-source:5432/${DB_SOURCE_NAME}
     volumes:
       - ./dags:/opt/airflow/dags
     ports:
@@ -122,8 +125,8 @@ services:
     image: minio/minio
     container_name: minio
     environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=password
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     networks:
       iceberg_net:
         aliases:
@@ -140,10 +143,22 @@ services:
     container_name: mc
     networks:
       - iceberg_net
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_LAKEHOUSE_ACCESS_KEY=${MINIO_LAKEHOUSE_ACCESS_KEY}
+      - MINIO_LAKEHOUSE_SECRET_KEY=${MINIO_LAKEHOUSE_SECRET_KEY}
     entrypoint: >
       /bin/sh -c "
-      until (/usr/bin/mc alias set minio http://minio:9000 admin password) do echo '...waiting...' && sleep 1; done;
+      until (/usr/bin/mc alias set minio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}) do echo '...waiting...' && sleep 1; done;
       /usr/bin/mc mb -p minio/warehouse;
+      /usr/bin/mc mb -p minio/hospital-lakehouse;
+      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/raw/.keep;
+      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/bronze/.keep;
+      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/silver/.keep;
+      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/gold/.keep;
+      /usr/bin/mc admin user add minio $${MINIO_LAKEHOUSE_ACCESS_KEY} $${MINIO_LAKEHOUSE_SECRET_KEY};
+      /usr/bin/mc admin policy attach minio readwrite --user $${MINIO_LAKEHOUSE_ACCESS_KEY};
       tail -f /dev/null
       "
 
