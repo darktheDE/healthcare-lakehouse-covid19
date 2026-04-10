@@ -1,27 +1,26 @@
-# Hướng dẫn Step-by-Step Task 1.2: Thiết lập Database nguồn và Nạp dữ liệu Synthea
+# Hướng dẫn Task 1.2: Thiết lập Database nguồn và Nạp dữ liệu Synthea
 
-Dựa trên việc phân tích file requirements và cấu trúc của dữ liệu CSV thực tế, tôi đã chuẩn bị hướng dẫn chi tiết kèm theo file DDL chính xác để bạn sửa lỗi import vừa rồi.
+Lỗi bạn gặp lúc chạy `COPY` (`missing data for column "healthcare_coverage"`) thường do cấu trúc bảng DDL bạn tạo chưa trùng khớp hoàn toàn với cấu trúc thật của file Synthea CSV. Dưới đây là bộ code DDL chuẩn ứng với dữ liệu hiện tại.
 
-Lỗi bạn gặp lúc chạy `COPY` (`missing data for column "healthcare_coverage"`) thường do cấu trúc bảng DDL bạn tạo chưa trùng khớp hoàn toàn với cấu trúc thật của file Synthea CSV, hoặc số lượng cột bị sai lệch (có thể do lỗi copy/paste hoặc không khai báo đầy đủ các trường null).
+Bạn có thể làm theo cách **Thủ công (Phần 1)** để hiểu rõ bản chất hoặc cách **Tự động (Phần 2)** nếu muốn tiết kiệm thời gian khởi tạo.
 
-Dưới đây là các bước chuẩn xác nhất:
+---
 
-## Bước 1: Truy cập container và dọn dẹp bảng cũ
-Vì bạn đã tạo bảng bị sai Schema, hãy drop database hoặc các bảng cũ:
+## PHẦN 1: CÁC BƯỚC LÀM THỦ CÔNG (MANUAL)
+
+### Bước 1: Dọn dẹp bảng cũ
 ```bash
 docker exec -it postgres-source psql -U admin -d hospital_db
 ```
-
-Trong psql, xóa các bảng lỗi:
+Trong `psql`, xóa các bảng lỗi:
 ```sql
 DROP TABLE IF EXISTS conditions CASCADE;
 DROP TABLE IF EXISTS encounters CASCADE;
 DROP TABLE IF EXISTS patients CASCADE;
 ```
 
-## Bước 2: Chạy script DDL (SQL) tạo bảng chính xác
-
-Chạy script sau trong cửa sổ `psql` để tạo các bảng với kiểu dữ liệu đã được map chuẩn theo Synthea (sử dụng UUID, DATE, NUMERIC):
+### Bước 2: Chạy script DDL tạo bảng chuẩn
+Chạy script sau trong cửa sổ `psql` để tạo các bảng với kiểu dữ liệu chuẩn (`UUID`, `DATE`, `NUMERIC`):
 
 ```sql
 -- Tạo bảng patients
@@ -83,66 +82,51 @@ CREATE TABLE conditions (
 );
 ```
 
-> [!NOTE]
-> Tư vấn dữ liệu: Sử dụng kiểu **TIMESTAMPTZ** thay cho TIMESTAMP thường để lưu timezone và **NUMERIC** thay cho Float hoặc Money đối với các cột tài chính (`healthcare_expenses`, `cost`...).
-
-## Bước 3: Đẩy file CSV vào PostgreSQL container
-Bạn đã làm đúng bước `docker cp` ở lần trước. Chạy các lệnh sau trên **Powershell của Windows (thoát khỏi psql bằng `\q`)**:
-
+### Bước 3: Đẩy file CSV vào PostgreSQL container
+Mở Powershell mới chạy lệnh copy từ máy tính vào Container:
 ```bash
 docker cp data/patients.csv postgres-source:/tmp/patients.csv
 docker cp data/encounters.csv postgres-source:/tmp/encounters.csv
 docker cp data/conditions.csv postgres-source:/tmp/conditions.csv
 ```
 
-## Bước 4: Nạp dữ liệu (COPY)
-Vào lại `psql` bằng lệnh:
-```bash
-docker exec -it postgres-source psql -U admin -d hospital_db
-```
-
-Chạy lệnh COPY (chú ý thứ tự vì khóa ngoại):
-
+### Bước 4: Nạp dữ liệu (COPY)
+Tiếp tục trong `psql`, chạy lệnh lệnh nạp theo trình tự khóa ngoại:
 ```sql
 COPY patients FROM '/tmp/patients.csv' DELIMITER ',' CSV HEADER;
 COPY encounters FROM '/tmp/encounters.csv' DELIMITER ',' CSV HEADER;
 COPY conditions FROM '/tmp/conditions.csv' DELIMITER ',' CSV HEADER;
 ```
 
-## Bước 5: Kiểm tra số lượng (Verify)
-Trong `psql`, chạy các lệnh sau để đảm bảo dữ liệu toàn vẹn:
+---
 
-```sql
-SELECT count(*) AS total_patients FROM patients;
-SELECT count(*) AS total_encounters FROM encounters;
-SELECT count(*) AS total_conditions FROM conditions;
+## PHẦN 2: TỰ ĐỘNG HÓA VỚI DOCKER COMPOSE
+
+Hệ thống đã được ánh xạ tự động Script thông qua volume. Bạn không cần gõ hay chép code SQL nữa.
+
+### Bước 1: Khởi chạy Database
+Từ thư mục dự án mở Powershell và chạy:
+```bash
+docker-compose -f deploy/docker-compose.yml up -d
 ```
 
-> [!TIP]
-> Do Synthea chứa rất nhiều bản ghi (Encounter lên tới hơn 3 triệu dòng), quá trình `COPY` có thể mất từ vài giây đến một phút là hoàn toàn bình thường.
+### Bước 2: Chờ quá trình `COPY` ngầm hoàn tất
+Do dung lượng bảng `encounters.csv` rất nặng (1GB - 3 triệu dòng), PostgreSQL sẽ từ chối trả về kết quả truy vấn `SELECT` nếu data lúc đó vẫn còn đang chép vào dở. Chờ từ 1-2 phút hoặc mở Logs để theo dõi tiến độ:
+```bash
+docker logs postgres-source -f
+```
+Khi thấy dòng log ghi `COPY 3188675`, nghĩa là bảng nặng nhất đã xử lý xong.
 
-## PHẦN MỞ RỘNG: Quy trình thêm bảng dữ liệu mới
-Khi dự án tiếp tục mở rộng và bạn cần nạp thêm các file CSV (ví dụ: `immunizations.csv`, `medications.csv`, `observations.csv`), hãy thực hiện quy trình sau để đảm bảo tính toàn vẹn:
+### Bước 3: Kiểm tra và Verify (áp dụng cho cả Phần 1 và 2)
+Sau khi load thành công, kiểm tra lại dữ liệu toàn vẹn:
+```bash
+docker exec -it postgres-source psql -U admin -d hospital_db -c "SELECT count(*) AS total_patients FROM patients;"
+docker exec -it postgres-source psql -U admin -d hospital_db -c "SELECT count(*) AS total_encounters FROM encounters;"
+docker exec -it postgres-source psql -U admin -d hospital_db -c "SELECT count(*) AS total_conditions FROM conditions;"
+```
 
-1. **Đọc và Phân tích dữ liệu gốc:**
-   - Xem cấu trúc file CSV (Dùng Python log 5 dòng đầu hoặc mở Preview file).
-   - Xác định chính xác **tên cột, số lượng cột** và **kiểu dữ liệu** của từng trường (ngày tháng, chuỗi, hay số float).
-   - Kiểm tra liên kết khóa ngoại (Foreign Keys). Ví dụ: cột `PATIENT` sẽ tham chiếu đến `patients(id)`.
-
-2. **Viết script DDL (SQL):**
-   - Định nghĩa DDL với `CREATE TABLE`.
-   - Lựa chọn kiểu dữ liệu tối ưu của PostgreSQL (`UUID` cho ID, `DATE` hoặc `TIMESTAMPTZ` cho thời gian, `TEXT` hoặc `VARCHAR` cho chuỗi, `NUMERIC` cho tiền tệ/điểm số).
-   - Khai báo rõ ràng Khóa chính (`PRIMARY KEY`) và Khóa ngoại (`REFERENCES`).
-
-3. **Copy File vào trong Container:**
-   - Sử dụng Docker CP để đưa file vào Container:
-     ```bash
-     docker cp data/new_table.csv postgres-source:/tmp/new_table.csv
-     ```
-
-4. **Nạp (COPY) và Xác thực (Verify):**
-   - Vào lại psql và chạy lệnh nạp dữ liệu:
-     ```sql
-     COPY new_table FROM '/tmp/new_table.csv' DELIMITER ',' CSV HEADER;
-     ```
-   - Chạy `SELECT count(*) FROM new_table;` hoặc `SELECT * FROM new_table LIMIT 5;` để đảm bảo dữ liệu ghi thành công và không bị lệch cột.
+### Mở rộng tự động với bảng mới
+Để nạp thêm tự động các file mới như `immunizations.csv`: 
+1. Đặt file vào folder `data/` ngoài host.
+2. Thêm hàm `CREATE` và `COPY` xuống dưới đáy file `deploy/postgres_init.sql`.
+3. Clear DB `docker-compose down -v` và chạy lại.
