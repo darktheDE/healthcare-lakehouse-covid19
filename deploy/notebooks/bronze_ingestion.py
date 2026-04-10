@@ -16,6 +16,10 @@ def main():
         .config("spark.sql.catalog.hospital.uri", "thrift://hive-metastore:9083") \
         .config("spark.sql.catalog.hospital.warehouse", "s3a://hospital-lakehouse/") \
         .config("spark.sql.catalog.hospital.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
+        .config("spark.sql.catalog.hospital.s3.endpoint", MINIO_ENDPOINT) \
+        .config("spark.sql.catalog.hospital.s3.access-key-id", MINIO_ACCESS_KEY) \
+        .config("spark.sql.catalog.hospital.s3.secret-access-key", MINIO_SECRET_KEY) \
+        .config("spark.sql.catalog.hospital.s3.path-style-access", "true") \
         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT) \
         .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY) \
         .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY) \
