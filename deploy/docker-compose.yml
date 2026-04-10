@@ -59,6 +59,8 @@ services:
       - iceberg_net
     ports:
       - "9083:9083"
+    command: >
+      sh -c "sed -i 's|/opt/hive/bin/hiveserver2|/opt/hive/bin/hive --service metastore|g' ./run.sh && ./run.sh"
 
   # XỬ LÝ DỮ LIỆU - CẤU HÌNH CƠ BẢN TỪ TABULAR
   spark-iceberg:
@@ -84,6 +86,28 @@ services:
     ports:
       - 8888:8888
       - 8080:8080
+
+  # JOB TỰ ĐỘNG INGESTION BRONZE (Sẽ tự động stop sau khi xong)
+  spark-bronze-job:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-bronze-job
+    networks:
+      - iceberg_net
+    depends_on:
+      - hive-metastore
+      - spark-iceberg
+    volumes:
+      - ./notebooks:/home/iceberg/notebooks/notebooks
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_REGION=us-east-1
+    command: >
+      bash -c "
+      echo 'Chờ hệ thống ổn định 15 giây...';
+      sleep 15;
+      spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 /home/iceberg/notebooks/notebooks/bronze_ingestion.py
+      "
 
   # --- TRUY VẤN DỮ LIỆU (TRINO) ---
   trino:
