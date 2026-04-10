@@ -72,3 +72,5 @@ logs/
 # MinIO / Iceberg local storage (if any)
 warehouse/
 minio_data/
+
+data/*.csv
