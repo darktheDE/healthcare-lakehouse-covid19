@@ -91,12 +91,19 @@ def wait_for_table(
     timeout_seconds: int = 300,
     required: bool = True,
 ) -> DataFrame | None:
-    try:
-        return spark.table(table_name)
-    except Exception as exc:
-        if not required:
-            return None
-        raise RuntimeError(f"Table {table_name} was not ready") from exc
+    deadline = time.time() + timeout_seconds
+    last_exception: Exception | None = None
+
+    while True:
+        try:
+            return spark.table(table_name)
+        except Exception as exc:
+            last_exception = exc
+            if time.time() >= deadline:
+                if not required:
+                    return None
+                raise RuntimeError(f"Table {table_name} was not ready") from exc
+            time.sleep(1)
 
 
 def clean_patients(patients: DataFrame) -> DataFrame:

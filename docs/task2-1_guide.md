@@ -1,4 +1,4 @@
-# Task 2.1 Guild: Silver Layer COVID Clinical Master
+# Task 2.1 Guide: Silver Layer COVID Clinical Master
 
 Tài liệu này tổng hợp đầy đủ quá trình triển khai Silver Layer cho bài toán COVID clinical analytics: chúng ta đã làm gì, vì sao làm như vậy, ý nghĩa của từng phép biến đổi dữ liệu, các lỗi đã gặp, cách xử lý và kết quả đạt được.
 
@@ -94,6 +94,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d
 
 ### Bước 2: Đảm bảo Bronze đã sẵn sàng
 ```bash
+docker compose --env-file .env -f deploy/docker-compose.yml up spark-raw-job
 docker compose --env-file .env -f deploy/docker-compose.yml up spark-bronze-job
 ```
 
