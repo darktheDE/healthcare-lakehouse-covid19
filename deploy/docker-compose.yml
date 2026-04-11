@@ -161,6 +161,36 @@ services:
           --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
           /home/iceberg/notebooks/notebooks/bronze_ingestion.py
 
+  spark-silver-job:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-silver-job
+    entrypoint: ["/bin/bash", "-c"]
+    networks:
+      - iceberg_net
+    depends_on:
+      hive-metastore:
+        condition: service_started
+      spark-bronze-job:
+        condition: service_completed_successfully
+    volumes:
+      - ../spark_jobs:/opt/spark_jobs
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_LAKEHOUSE_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_LAKEHOUSE_SECRET_KEY}
+      - AWS_REGION=us-east-1
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_BUCKET=hospital-lakehouse
+    command:
+      - |
+        echo '>>> [spark-silver-job] Bronze ingestion complete, starting Silver cleansing...';
+        spark-submit \
+          --driver-memory 3g \
+          --conf spark.sql.adaptive.enabled=true \
+          --conf spark.sql.adaptive.coalescePartitions.enabled=true \
+          --conf spark.sql.shuffle.partitions=256 \
+          --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
+          /opt/spark_jobs/silver_cleansing.py
+          
   # --- TRUY VẤN DỮ LIỆU (TRINO) ---
   trino:
     image: trinodb/trino
