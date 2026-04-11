@@ -158,8 +158,10 @@ services:
     networks:
       - iceberg_net
     depends_on:
-      - hive-metastore
-      - spark-bronze-job
+      hive-metastore:
+        condition: service_started
+      spark-bronze-job:
+        condition: service_completed_successfully
     volumes:
       - ../spark_jobs:/opt/spark_jobs
     environment:
@@ -170,8 +172,7 @@ services:
       - MINIO_BUCKET=hospital-lakehouse
     command:
       - |
-        echo '>>> [spark-silver-job] Waiting for Bronze tables to be ready...';
-        sleep 20;
+        echo '>>> [spark-silver-job] Bronze ingestion complete, starting Silver cleansing...';
         spark-submit \
           --driver-memory 3g \
           --conf spark.sql.adaptive.enabled=true \
