@@ -91,19 +91,12 @@ def wait_for_table(
     timeout_seconds: int = 300,
     required: bool = True,
 ) -> DataFrame | None:
-    deadline = time.time() + timeout_seconds
-    last_exception: Exception | None = None
-
-    while True:
-        try:
-            return spark.table(table_name)
-        except Exception as exc:
-            last_exception = exc
-            if time.time() >= deadline:
-                if not required:
-                    return None
-                raise RuntimeError(f"Table {table_name} was not ready") from exc
-            time.sleep(1)
+    try:
+        return spark.table(table_name)
+    except Exception as exc:
+        if not required:
+            return None
+        raise RuntimeError(f"Table {table_name} was not ready") from exc
 
 
 def clean_patients(patients: DataFrame) -> DataFrame:
@@ -382,10 +375,10 @@ def main() -> None:
     spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {SILVER_NAMESPACE}")
 
     print("[INFO] Cleaning source tables...")
-    patients_clean = clean_patients(patients_bronze).cache()
-    encounters_clean = clean_encounters(encounters_bronze).cache()
-    conditions_clean = clean_conditions(conditions_bronze).cache()
-    observations_clean = clean_observations(observations_bronze).cache() if observations_bronze is not None else None
+    patients_clean = clean_patients(patients_bronze)
+    encounters_clean = clean_encounters(encounters_bronze)
+    conditions_clean = clean_conditions(conditions_bronze)
+    observations_clean = clean_observations(observations_bronze) if observations_bronze is not None else None
 
     print(f"[INFO] Clean rows - patients: {patients_clean.count()}")
     print(f"[INFO] Clean rows - encounters: {encounters_clean.count()}")
@@ -400,7 +393,7 @@ def main() -> None:
         encounters_clean,
         conditions_clean,
         observations_clean,
-    ).cache()
+    )
 
     result_count = covid_clinical_master.count()
     print(f"[INFO] COVID clinical master rows: {result_count}")
@@ -408,26 +401,13 @@ def main() -> None:
     print(f"[INFO] Writing target table: {OUTPUT_TABLE}")
     covid_clinical_master.writeTo(OUTPUT_TABLE).createOrReplace()
 
-    # Verify using Iceberg snapshot metadata rather than a full re-scan
-    snapshot_rows = spark.sql(
-        f"SELECT record_count FROM {OUTPUT_TABLE}.snapshots ORDER BY committed_at DESC LIMIT 1"
-    ).collect()
-    if not snapshot_rows:
-        raise RuntimeError(f"No Iceberg snapshot found for {OUTPUT_TABLE} after write.")
-    snapshot_count = snapshot_rows[0][0]
-    print(f"[INFO] Iceberg snapshot record count: {snapshot_count}")
+    persisted_count = spark.table(OUTPUT_TABLE).count()
+    print(f"[INFO] Persisted row count: {persisted_count}")
 
-    if snapshot_count != result_count:
+    if persisted_count != result_count:
         raise RuntimeError(
-            f"Persisted row count mismatch: expected {result_count}, got {snapshot_count}"
+            f"Persisted row count mismatch: expected {result_count}, got {persisted_count}"
         )
-
-    patients_clean.unpersist()
-    encounters_clean.unpersist()
-    conditions_clean.unpersist()
-    if observations_clean is not None:
-        observations_clean.unpersist()
-    covid_clinical_master.unpersist()
 
     print_metadata_checks(spark, OUTPUT_TABLE)
 
@@ -437,4 +417,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

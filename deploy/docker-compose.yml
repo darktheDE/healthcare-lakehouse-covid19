@@ -15,18 +15,11 @@ services:
       - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
       - ../data:/data_source
     healthcheck:
-      test:
-        [
-          "CMD",
-          "pg_isready",
-          "-U",
-          "${DB_SOURCE_USER}",
-          "-d",
-          "${DB_SOURCE_NAME}",
-        ]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${DB_SOURCE_USER} -d ${DB_SOURCE_NAME}"]
+      interval: 10s
       timeout: 5s
-      retries: 20
+      retries: 5
+      start_period: 30s
 
   metastore-db:
     image: postgres:15
@@ -38,15 +31,7 @@ services:
     networks:
       - iceberg_net
     healthcheck:
-      test:
-        [
-          "CMD",
-          "pg_isready",
-          "-U",
-          "${DB_METASTORE_USER}",
-          "-d",
-          "${DB_METASTORE_NAME}",
-        ]
+      test: [ "CMD", "pg_isready", "-U", "${DB_METASTORE_USER}", "-d", "${DB_METASTORE_NAME}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -67,7 +52,7 @@ services:
       - DATABASE_TYPE=postgres
 
       # S3 / MinIO Config
-      - S3_BUCKET=warehouse
+      - S3_BUCKET=hospital-lakehouse
       - S3_PREFIX=iceberg
       - S3_REGION=us-east-1
       - S3_ENDPOINT_URL=http://minio:9000
@@ -96,14 +81,19 @@ services:
       - ./warehouse:/home/iceberg/warehouse
       - ./notebooks:/home/iceberg/notebooks/notebooks
     environment:
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_ACCESS_KEY_ID=${MINIO_LAKEHOUSE_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_LAKEHOUSE_SECRET_KEY}
       - AWS_REGION=us-east-1
       # Cấu hình để Spark ghi vào Hive Catalog thay vì REST
       - SPARK_CONF_spark_sql_catalog_demo=org.apache.iceberg.spark.SparkCatalog
       - SPARK_CONF_spark_sql_catalog_demo_catalog-impl=org.apache.iceberg.hive.HiveCatalog
       - SPARK_CONF_spark_sql_catalog_demo_uri=thrift://hive-metastore:9083
-      - SPARK_CONF_spark_sql_catalog_demo_warehouse=s3a://warehouse/
+      - SPARK_CONF_spark_sql_catalog_demo_warehouse=s3a://hospital-lakehouse/
+      # Thêm catalog hospital cho Jupyter
+      - SPARK_CONF_spark_sql_catalog_hospital=org.apache.iceberg.spark.SparkCatalog
+      - SPARK_CONF_spark_sql_catalog_hospital_catalog-impl=org.apache.iceberg.hive.HiveCatalog
+      - SPARK_CONF_spark_sql_catalog_hospital_uri=thrift://hive-metastore:9083
+      - SPARK_CONF_spark_sql_catalog_hospital_warehouse=s3a://hospital-lakehouse/
     ports:
       - 8888:8888
       - 8080:8080
@@ -123,8 +113,8 @@ services:
     volumes:
       - ../spark_jobs:/opt/spark_jobs
     environment:
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - AWS_ACCESS_KEY_ID=${MINIO_LAKEHOUSE_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_LAKEHOUSE_SECRET_KEY}
       - AWS_REGION=us-east-1
       - MINIO_ENDPOINT=http://minio:9000
       - PG_HOST=postgres-source
@@ -157,8 +147,11 @@ services:
     volumes:
       - ./notebooks:/home/iceberg/notebooks/notebooks
     environment:
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_ACCESS_KEY=${MINIO_LAKEHOUSE_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_LAKEHOUSE_SECRET_KEY}
+      - AWS_ACCESS_KEY_ID=${MINIO_LAKEHOUSE_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_LAKEHOUSE_SECRET_KEY}
+      - MINIO_ENDPOINT=http://minio:9000
       - AWS_REGION=us-east-1
     command:
       - |
@@ -168,7 +161,6 @@ services:
           --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
           /home/iceberg/notebooks/notebooks/bronze_ingestion.py
 
-  # JOB SILVER: BRONZE -> SILVER covid_clinical_master
   spark-silver-job:
     image: tabulario/spark-iceberg:latest
     container_name: spark-silver-job
@@ -198,7 +190,7 @@ services:
           --conf spark.sql.shuffle.partitions=256 \
           --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
           /opt/spark_jobs/silver_cleansing.py
-
+          
   # --- TRUY VẤN DỮ LIỆU (TRINO) ---
   trino:
     image: trinodb/trino
