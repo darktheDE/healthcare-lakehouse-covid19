@@ -29,6 +29,7 @@ GOLD_NAMESPACE = f"{CATALOG_NAME}.gold"
 COVID_MASTER_TABLE = f"{SILVER_NAMESPACE}.covid_clinical_master"
 CONDITIONS_TABLE = f"{SILVER_NAMESPACE}.conditions"
 OUTPUT_TABLE = f"{GOLD_NAMESPACE}.symptoms_outcomes"
+MORTALITY_TABLE = f"{GOLD_NAMESPACE}.mortality_demographics"
 
 
 def build_spark() -> SparkSession:
@@ -168,6 +169,55 @@ def main() -> None:
 
     print("\n[CHECK] Hive Metastore metadata for target table:")
     print(f"  - table exists: {spark.catalog.tableExists(OUTPUT_TABLE)}")
+
+    # --------------------------------------------------------------------------------
+    # TASK 2.2: Mortality Demographics (Phân tích Tỷ lệ tử vong theo độ tuổi và giới tính)
+    # --------------------------------------------------------------------------------
+    print("\n" + "=" * 72)
+    print("  Task 2.2: Mortality Demographics logic starting...")
+    print("=" * 72)
+
+    # 1. Lọc bệnh nhân tử vong
+    mortality_cohort = covid_master_df.filter(F.col("patient_deathdate").isNotNull())
+
+    # 2. Tính tuổi lúc mất
+    mortality_with_age = mortality_cohort.withColumn(
+        "age_at_death",
+        F.year("patient_deathdate") - F.year("patient_birthdate")
+    )
+
+    # 3. Phân nhóm tuổi (Age Binning)
+    mortality_binned = mortality_with_age.withColumn(
+        "Age_Range",
+        F.when(F.col("patient_birthdate").isNull(), "Unknown")
+         .when(F.col("age_at_death") <= 10, "0-10")
+         .when(F.col("age_at_death") <= 20, "11-20")
+         .when(F.col("age_at_death") <= 30, "21-30")
+         .when(F.col("age_at_death") <= 40, "31-40")
+         .when(F.col("age_at_death") <= 50, "41-50")
+         .when(F.col("age_at_death") <= 60, "51-60")
+         .when(F.col("age_at_death") <= 70, "61-70")
+         .when(F.col("age_at_death") <= 80, "71-80")
+         .otherwise("80+")
+    )
+
+    # 4. Aggregation
+    mortality_agg = (
+        mortality_binned
+        .groupBy("Age_Range", "gender")
+        .agg(F.count("patient_id").alias("mortality_count"))
+        .orderBy("Age_Range", "gender")
+    )
+
+    mortality_result_count = mortality_agg.count()
+    print(f"[INFO] Mortality logic completed. Result rows: {mortality_result_count}")
+    mortality_agg.show(truncate=False)
+
+    print(f"[INFO] Writing target table: {MORTALITY_TABLE}")
+    mortality_agg.writeTo(MORTALITY_TABLE).createOrReplace()
+
+    print("\n[CHECK] Hive Metastore metadata for target table:")
+    print(f"  - table exists: {spark.catalog.tableExists(MORTALITY_TABLE)}")
 
     print("\n[DONE] Gold table aggregation completed successfully.")
     spark.stop()
