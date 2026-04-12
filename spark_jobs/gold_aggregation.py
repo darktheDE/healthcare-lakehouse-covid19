@@ -30,6 +30,8 @@ COVID_MASTER_TABLE = f"{SILVER_NAMESPACE}.covid_clinical_master"
 CONDITIONS_TABLE = f"{SILVER_NAMESPACE}.conditions"
 OUTPUT_TABLE = f"{GOLD_NAMESPACE}.symptoms_outcomes"
 MORTALITY_TABLE = f"{GOLD_NAMESPACE}.mortality_demographics"
+ENCOUNTERS_TABLE = f"{SILVER_NAMESPACE}.encounters"
+HOSPITALIZATION_TABLE = f"{GOLD_NAMESPACE}.hospitalization_workload"
 
 
 def build_spark() -> SparkSession:
@@ -174,7 +176,7 @@ def main() -> None:
     # TASK 2.2: Mortality Demographics (Phân tích Tỷ lệ tử vong theo độ tuổi và giới tính)
     # --------------------------------------------------------------------------------
     print("\n" + "=" * 72)
-    print("  Task 2.2: Mortality Demographics logic starting...")
+    print("  Mortality Demographics logic starting...")
     print("=" * 72)
 
     # 1. Lọc bệnh nhân tử vong
@@ -218,6 +220,61 @@ def main() -> None:
 
     print("\n[CHECK] Hive Metastore metadata for target table:")
     print(f"  - table exists: {spark.catalog.tableExists(MORTALITY_TABLE)}")
+
+    # --------------------------------------------------------------------------------
+    # TASK 2.3: Hospitalization & ICU Workload (Phân tích gánh nặng y tế)
+    # --------------------------------------------------------------------------------
+    print("\n" + "=" * 72)
+    print("  Hospitalization & ICU Workload logic starting...")
+    print("=" * 72)
+
+    print("[INFO] Waiting for silver encounters table to be ready...")
+    encounters_df = wait_for_table(spark, ENCOUNTERS_TABLE)
+
+    total_covid_patients = covid_master_df.count()
+
+    # Lọc encounters code (1505002 - Hospital Admission, 305351004 - ICU Admission)
+    target_encounters = encounters_df.filter(
+        F.col("encounter_code").isin("1505002", "305351004")
+    )
+
+    # Chỉ lấy bệnh nhân dính COVID-19
+    covid_encounters = target_encounters.join(
+        covid_master_df.select("patient_id"), 
+        on="patient_id", 
+        how="semi"
+    )
+
+    # Tính LOS = difference in days between start and stop
+    hospitalization_df = covid_encounters.withColumn(
+        "length_of_stay_days",
+        F.datediff("encounter_stop", "encounter_start")
+    )
+
+    # Aggregation
+    hospitalization_agg = (
+        hospitalization_df
+        .groupBy("encounter_description")
+        .agg(
+            F.countDistinct("patient_id").alias("patient_count"),
+            F.round(F.avg("length_of_stay_days"), 2).alias("avg_length_of_stay_days")
+        )
+        .withColumn(
+            "percentage",
+            F.round((F.col("patient_count") / F.lit(total_covid_patients)) * 100, 2)
+        )
+        .orderBy("encounter_description")
+    )
+
+    hosp_result_count = hospitalization_agg.count()
+    print(f"[INFO] Hospitalization logic completed. Result rows: {hosp_result_count}")
+    hospitalization_agg.show(truncate=False)
+
+    print(f"[INFO] Writing target table: {HOSPITALIZATION_TABLE}")
+    hospitalization_agg.writeTo(HOSPITALIZATION_TABLE).createOrReplace()
+
+    print("\n[CHECK] Hive Metastore metadata for target table:")
+    print(f"  - table exists: {spark.catalog.tableExists(HOSPITALIZATION_TABLE)}")
 
     print("\n[DONE] Gold table aggregation completed successfully.")
     spark.stop()
