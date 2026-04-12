@@ -401,6 +401,10 @@ def main() -> None:
     print(f"[INFO] Writing target table: {OUTPUT_TABLE}")
     covid_clinical_master.writeTo(OUTPUT_TABLE).createOrReplace()
 
+    CONDITIONS_OUTPUT_TABLE = f"{SILVER_NAMESPACE}.conditions"
+    print(f"[INFO] Writing target table: {CONDITIONS_OUTPUT_TABLE}")
+    conditions_clean.writeTo(CONDITIONS_OUTPUT_TABLE).createOrReplace()
+
     persisted_count = spark.table(OUTPUT_TABLE).count()
     print(f"[INFO] Persisted row count: {persisted_count}")
 
