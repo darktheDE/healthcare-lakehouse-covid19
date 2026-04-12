@@ -4,11 +4,10 @@ silver_cleansing.py
 Build a Silver clinical master table for COVID analysis from Bronze tables.
 
 Flow:
-1. Read Bronze Iceberg tables: patients, encounters, conditions, observations (optional).
+1. Read Bronze Iceberg tables: patients, encounters, conditions.
 2. Clean and cast key date/time columns.
 3. Filter to COVID cohort:
-    - conditions.code = '840539006' OR
-    - positive observations.
+    - conditions.code = '840539006'
 4. LEFT JOIN patient-centric summaries.
 5. Write Iceberg table: hospital.silver.covid_clinical_master.
 """
@@ -40,7 +39,6 @@ OUTPUT_TABLE = f"{SILVER_NAMESPACE}.covid_clinical_master"
 BRONZE_PATIENTS = f"{BRONZE_NAMESPACE}.patients"
 BRONZE_ENCOUNTERS = f"{BRONZE_NAMESPACE}.encounters"
 BRONZE_CONDITIONS = f"{BRONZE_NAMESPACE}.conditions"
-BRONZE_OBSERVATIONS = f"{BRONZE_NAMESPACE}.observations"
 
 
 def build_spark() -> SparkSession:
@@ -187,41 +185,11 @@ def clean_conditions(conditions: DataFrame) -> DataFrame:
     )
 
 
-def clean_observations(observations: DataFrame) -> DataFrame:
-    cols = {c.lower(): c for c in observations.columns}
-    date_col = cols.get("date", cols.get("start", cols.get("start_date", None)))
-
-    selected = observations.select(
-        normalize_identifier(F.col(cols.get("patient", "patient"))).alias("patient_id"),
-        normalize_identifier(F.col(cols.get("encounter", "encounter"))).alias("encounter_id"),
-        (F.to_timestamp(F.col(date_col)) if date_col else F.lit(None).cast("timestamp")).alias(
-            "observation_time"
-        ),
-        F.col(cols.get("code", "code")).cast("string").alias("observation_code"),
-        F.col(cols.get("description", "description")).cast("string").alias("observation_description"),
-        F.col(cols.get("value", "value")).cast("string").alias("observation_value"),
-    )
-
-    return (
-        selected.filter(F.col("patient_id").isNotNull())
-        .dropDuplicates(
-            [
-                "patient_id",
-                "encounter_id",
-                "observation_time",
-                "observation_code",
-                "observation_description",
-                "observation_value",
-            ]
-        )
-    )
-
 
 def build_covid_clinical_master(
     patients: DataFrame,
     encounters: DataFrame,
     conditions: DataFrame,
-    observations: DataFrame | None,
 ) -> DataFrame:
     covid_from_conditions = (
         conditions.filter(F.col("condition_code") == F.lit("840539006"))
@@ -229,21 +197,7 @@ def build_covid_clinical_master(
         .distinct()
     )
 
-    observation_summary = None
-    covid_from_observations = None
-    if observations is not None:
-        positive_flag = (
-            F.upper(F.coalesce(F.col("observation_value"), F.lit(""))).rlike(
-                "POSITIVE|DETECTED|REACTIVE"
-            )
-            | F.upper(F.coalesce(F.col("observation_description"), F.lit(""))).contains("POSITIVE")
-        )
-
-        covid_from_observations = observations.filter(positive_flag).select("patient_id").distinct()
-
     covid_patients = covid_from_conditions
-    if covid_from_observations is not None:
-        covid_patients = covid_patients.unionByName(covid_from_observations).distinct()
 
     # Aggregate only the COVID cohort to reduce shuffle/memory pressure.
     conditions_covid = conditions.join(covid_patients, on="patient_id", how="semi")
@@ -270,16 +224,6 @@ def build_covid_clinical_master(
         )
     )
 
-    if observations is not None:
-        observation_summary = (
-            observations.join(covid_patients, on="patient_id", how="semi")
-            .repartition("patient_id")
-            .groupBy("patient_id")
-            .agg(
-                F.count(F.lit(1)).alias("observation_count"),
-                F.max(F.col("observation_time")).alias("last_observation_time"),
-            )
-        )
 
     master = (
         patients.alias("p")
@@ -288,10 +232,6 @@ def build_covid_clinical_master(
         .join(condition_summary.alias("c"), F.col("p.patient_id") == F.col("c.patient_id"), "left")
     )
 
-    if observation_summary is not None:
-        master = master.join(
-            observation_summary.alias("o"), F.col("p.patient_id") == F.col("o.patient_id"), "left"
-        )
 
     select_columns = [
         F.col("p.patient_id"),
@@ -328,20 +268,6 @@ def build_covid_clinical_master(
         F.col("c.last_condition_date"),
     ]
 
-    if observation_summary is not None:
-        select_columns.extend(
-            [
-                F.coalesce(F.col("o.observation_count"), F.lit(0)).alias("observation_count"),
-                F.col("o.last_observation_time"),
-            ]
-        )
-    else:
-        select_columns.extend(
-            [
-                F.lit(0).alias("observation_count"),
-                F.lit(None).cast("timestamp").alias("last_observation_time"),
-            ]
-        )
 
     return master.select(*select_columns)
 
@@ -370,7 +296,6 @@ def main() -> None:
     patients_bronze = wait_for_table(spark, BRONZE_PATIENTS)
     encounters_bronze = wait_for_table(spark, BRONZE_ENCOUNTERS)
     conditions_bronze = wait_for_table(spark, BRONZE_CONDITIONS)
-    observations_bronze = wait_for_table(spark, BRONZE_OBSERVATIONS, timeout_seconds=120, required=False)
 
     spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {SILVER_NAMESPACE}")
 
@@ -378,21 +303,15 @@ def main() -> None:
     patients_clean = clean_patients(patients_bronze)
     encounters_clean = clean_encounters(encounters_bronze)
     conditions_clean = clean_conditions(conditions_bronze)
-    observations_clean = clean_observations(observations_bronze) if observations_bronze is not None else None
 
     print(f"[INFO] Clean rows - patients: {patients_clean.count()}")
     print(f"[INFO] Clean rows - encounters: {encounters_clean.count()}")
     print(f"[INFO] Clean rows - conditions: {conditions_clean.count()}")
-    if observations_clean is None:
-        print("[WARN] Bronze observations table not found. Continue with conditions-based COVID filter only.")
-    else:
-        print(f"[INFO] Clean rows - observations: {observations_clean.count()}")
 
     covid_clinical_master = build_covid_clinical_master(
         patients_clean,
         encounters_clean,
         conditions_clean,
-        observations_clean,
     )
 
     result_count = covid_clinical_master.count()
@@ -404,6 +323,10 @@ def main() -> None:
     CONDITIONS_OUTPUT_TABLE = f"{SILVER_NAMESPACE}.conditions"
     print(f"[INFO] Writing target table: {CONDITIONS_OUTPUT_TABLE}")
     conditions_clean.writeTo(CONDITIONS_OUTPUT_TABLE).createOrReplace()
+
+    ENCOUNTERS_OUTPUT_TABLE = f"{SILVER_NAMESPACE}.encounters"
+    print(f"[INFO] Writing target table: {ENCOUNTERS_OUTPUT_TABLE}")
+    encounters_clean.writeTo(ENCOUNTERS_OUTPUT_TABLE).createOrReplace()
 
     persisted_count = spark.table(OUTPUT_TABLE).count()
     print(f"[INFO] Persisted row count: {persisted_count}")
