@@ -10,6 +10,7 @@ Bạn có thể làm theo cách **Thủ công (Phần 1)** để hiểu rõ bả
 
 ### Bước 1: Dọn dẹp bảng cũ
 ```bash
+# Kiểm tra .env để lấy DB_SOURCE_USER và DB_SOURCE_NAME
 docker exec -it postgres-source psql -U admin -d hospital_db
 ```
 Trong `psql`, xóa các bảng lỗi:
@@ -107,7 +108,8 @@ Hệ thống đã được ánh xạ tự động Script thông qua volume. Bạ
 ### Bước 1: Khởi chạy Database
 Từ thư mục dự án mở Powershell và chạy:
 ```bash
-docker-compose -f deploy/docker-compose.yml up -d
+# Luôn chạy từ thư mục gốc của project để nạp đúng .env
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 
 ### Bước 2: Chờ quá trình `COPY` ngầm hoàn tất
@@ -120,6 +122,7 @@ Khi thấy dòng log ghi `COPY 3188675`, nghĩa là bảng nặng nhất đã x�
 ### Bước 3: Kiểm tra và Verify (áp dụng cho cả Phần 1 và 2)
 Sau khi load thành công, kiểm tra lại dữ liệu toàn vẹn:
 ```bash
+# Sử dụng admin/hospital_db (hoặc giá trị trong .env)
 docker exec -it postgres-source psql -U admin -d hospital_db -c "SELECT count(*) AS total_patients FROM patients;"
 docker exec -it postgres-source psql -U admin -d hospital_db -c "SELECT count(*) AS total_encounters FROM encounters;"
 docker exec -it postgres-source psql -U admin -d hospital_db -c "SELECT count(*) AS total_conditions FROM conditions;"

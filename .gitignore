@@ -74,3 +74,4 @@ warehouse/
 minio_data/
 
 data/*.csv
+*.log
