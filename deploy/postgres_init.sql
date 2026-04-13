@@ -55,7 +55,3 @@ CREATE TABLE conditions (
     code VARCHAR(50),
     description VARCHAR(255)
 );
-
-COPY patients FROM '/data_source/patients.csv' DELIMITER ',' CSV HEADER;
-COPY encounters FROM '/data_source/encounters.csv' DELIMITER ',' CSV HEADER;
-COPY conditions FROM '/data_source/conditions.csv' DELIMITER ',' CSV HEADER;
