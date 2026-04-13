@@ -1,31 +1,71 @@
 services:
-  # NGUỒN DỮ LIỆU POSTGRES SOURCE
+  # 1. Database nguồn (PostgreSQL) - Chứa dữ liệu thô ban đầu
   postgres-source:
-    image: postgres:15
+    image: postgres:15-alpine
     container_name: postgres-source
     environment:
-      - POSTGRES_USER=${DB_SOURCE_USER}
-      - POSTGRES_PASSWORD=${DB_SOURCE_PASSWORD}
-      - POSTGRES_DB=${DB_SOURCE_NAME}
+      - POSTGRES_USER=${DB_SOURCE_USER:-admin}
+      - POSTGRES_PASSWORD=${DB_SOURCE_PASSWORD:-password}
+      - POSTGRES_DB=${DB_SOURCE_NAME:-hospital_db}
     networks:
-      - iceberg_net
+      - lakehouse_net
     ports:
       - "5432:5432"
     volumes:
       - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
       - ../data:/data_source
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_SOURCE_USER:-admin} -d ${DB_SOURCE_NAME:-hospital_db}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # 2. Storage (MinIO) - Cloud Storage giả lập (S3)
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-lakehouse_admin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+    networks:
+      - lakehouse_net
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. MinIO Setup (mc) - Tự động tạo Bucket và phân quyền
+  mc:
+    image: minio/mc:latest
+    container_name: mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - lakehouse_net
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-lakehouse_admin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+    entrypoint: >
+      /bin/sh -c " /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; /usr/bin/mc mb -p local/hospital-lakehouse; /usr/bin/mc mb -p local/hospital-lakehouse/raw; /usr/bin/mc mb -p local/hospital-lakehouse/warehouse; exit 0; "
+
+  # 4. Hive Metastore - Quản lý Metadata cho Iceberg
   metastore-db:
-    image: postgres:15
+    image: postgres:15-alpine
     container_name: metastore-db
     environment:
-      - POSTGRES_USER=${DB_METASTORE_USER}
-      - POSTGRES_PASSWORD=${DB_METASTORE_PASSWORD}
-      - POSTGRES_DB=${DB_METASTORE_NAME}
+      - POSTGRES_USER=${DB_METASTORE_USER:-metastore}
+      - POSTGRES_PASSWORD=${DB_METASTORE_PASSWORD:-password}
+      - POSTGRES_DB=${DB_METASTORE_NAME:-metastore_db}
     networks:
-      - iceberg_net
+      - lakehouse_net
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "${DB_METASTORE_USER}", "-d", "${DB_METASTORE_NAME}" ]
+      test: [ "CMD", "pg_isready", "-U", "metastore", "-d", "metastore_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,187 +77,95 @@ services:
       metastore-db:
         condition: service_healthy
     environment:
-      # Database Config
       - DATABASE_HOST=metastore-db
       - DATABASE_PORT=5432
-      - DATABASE_DB=${DB_METASTORE_NAME}
-      - DATABASE_USER=${DB_METASTORE_USER}
-      - DATABASE_PASSWORD=${DB_METASTORE_PASSWORD}
+      - DATABASE_DB=${DB_METASTORE_NAME:-metastore_db}
+      - DATABASE_USER=${DB_METASTORE_USER:-metastore}
+      - DATABASE_PASSWORD=${DB_METASTORE_PASSWORD:-password}
       - DATABASE_TYPE=postgres
-
-      # S3 / MinIO Config
-      - S3_BUCKET=warehouse
+      - S3_BUCKET=hospital-lakehouse
       - S3_PREFIX=iceberg
       - S3_REGION=us-east-1
       - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-
-      # Thêm cái này để chắc chắn script không đòi thêm
-      - AWS_S3_ENDPOINT=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-lakehouse_admin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
     networks:
-      - iceberg_net
+      - lakehouse_net
     ports:
       - "9083:9083"
-    command: >
-      sh -c "sed -i 's|/opt/hive/bin/hiveserver2|/opt/hive/bin/hive --service metastore|g' ./run.sh && ./run.sh"
 
-  # XỬ LÝ DỮ LIỆU - CẤU HÌNH CƠ BẢN TỪ TABULAR
-  spark-iceberg:
-    image: tabulario/spark-iceberg
-    container_name: spark-iceberg
-    networks:
-      - iceberg_net
-    depends_on:
-      - minio
-      - hive-metastore
-    volumes:
-      - ./warehouse:/home/iceberg/warehouse
-      - ./notebooks:/home/iceberg/notebooks/notebooks
-    environment:
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - AWS_REGION=us-east-1
-      # Cấu hình để Spark ghi vào Hive Catalog thay vì REST
-      - SPARK_CONF_spark_sql_catalog_demo=org.apache.iceberg.spark.SparkCatalog
-      - SPARK_CONF_spark_sql_catalog_demo_catalog-impl=org.apache.iceberg.hive.HiveCatalog
-      - SPARK_CONF_spark_sql_catalog_demo_uri=thrift://hive-metastore:9083
-      - SPARK_CONF_spark_sql_catalog_demo_warehouse=s3a://warehouse/
-    ports:
-      - 8888:8888
-      - 8080:8080
-
-  # JOB ETL: POSTGRES → MINIO raw/ (chạy 1 lần rồi dừng)
-  spark-raw-job:
-    image: tabulario/spark-iceberg:latest
-    container_name: spark-raw-job
-    entrypoint: ["/bin/bash", "-c"]
-    networks:
-      - iceberg_net
-    depends_on:
-      - minio
-      - postgres-source
-    volumes:
-      - ../spark_jobs:/opt/spark_jobs
-    environment:
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - AWS_REGION=us-east-1
-      - MINIO_ENDPOINT=http://minio:9000
-      - PG_HOST=postgres-source
-      - PG_PORT=5432
-      - PG_DB=${DB_SOURCE_NAME}
-      - PG_USER=${DB_SOURCE_USER}
-      - PG_PASSWORD=${DB_SOURCE_PASSWORD}
-    command:
-      - |
-        echo '>>> [spark-raw-job] Chờ MinIO và Postgres sẵn sàng (20s)...';
-        sleep 20;
-        spark-submit \
-          --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.postgresql:postgresql:42.6.0 \
-          /opt/spark_jobs/postgres_to_raw.py
-
-  # JOB TỰ ĐỘNG INGESTION BRONZE (Sẽ tự động stop sau khi xong)
-  spark-bronze-job:
-    image: tabulario/spark-iceberg:latest
-    container_name: spark-bronze-job
-    entrypoint: ["/bin/bash", "-c"]
-    networks:
-      - iceberg_net
-    depends_on:
-      - hive-metastore
-      - spark-iceberg
-      - spark-raw-job
-    volumes:
-      - ./notebooks:/home/iceberg/notebooks/notebooks
-    environment:
-      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
-      - AWS_REGION=us-east-1
-    command:
-      - |
-        echo '>>> [spark-bronze-job] Chờ hệ thống ổn định 15 giây...';
-        sleep 15;
-        spark-submit \
-          --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
-          /home/iceberg/notebooks/notebooks/bronze_ingestion.py
-
-  # --- TRUY VẤN DỮ LIỆU (TRINO) ---
-  trino:
-    image: trinodb/trino
-    container_name: trino
-    networks:
-      - iceberg_net
-    ports:
-      - "8081:8080"
-    volumes:
-      - ./trino/catalog:/etc/trino/catalog
-    environment:
-      # Tăng RAM để Trino chạy ổn định
-      - TRINO_JVM_MAX_HEAP_SIZE=1G
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-
-  # --- ĐIỀU PHỐI (AIRFLOW) ---
+  # 5. Airflow - Orchestrator (Kèm sẵn Spark runtime)
   airflow:
-    image: apache/airflow:2.7.1
+    build: .
     container_name: airflow
-    networks:
-      - iceberg_net
     depends_on:
-      - postgres-source
+      postgres-source:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${DB_SOURCE_USER}:${DB_SOURCE_PASSWORD}@postgres-source:5432/${DB_SOURCE_NAME}
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
+      # Cấu hình tài khoản Admin cố định
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=password
+      - _AIRFLOW_WWW_USER_ROLE=Admin
+      - _AIRFLOW_WWW_USER_EMAIL=admin@example.com
+      # Auto-connections
+      - AIRFLOW_CONN_POSTGRES_DEFAULT=postgres://${DB_SOURCE_USER:-admin}:${DB_SOURCE_PASSWORD:-password}@postgres-source:5432/${DB_SOURCE_NAME:-hospital_db}
+      - AIRFLOW_CONN_SPARK_DEFAULT=spark://local?master=local%5B*%5D
+      - AIRFLOW_CONN_AWS_DEFAULT=aws://${MINIO_ROOT_USER:-lakehouse_admin}:${MINIO_ROOT_PASSWORD:-Lakehouse123!}@?endpoint_url=http%3A%2F%2Fminio%3A9000
+      # Lakehouse Config
+      - PG_HOST=postgres-source
+      - PG_DB=${DB_SOURCE_NAME:-hospital_db}
+      - PG_USER=${DB_SOURCE_USER:-admin}
+      - PG_PASSWORD=${DB_SOURCE_PASSWORD:-password}
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-lakehouse_admin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-lakehouse_admin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+    networks:
+      - lakehouse_net
     volumes:
+      - airflow_data:/opt/airflow
       - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/spark/scripts
+      - ../jars:/opt/spark/jars
+      - ../data:/data_source
     ports:
-      - "8082:8080"
+      - "8080:8080"
     command: standalone
 
-  # --- STORAGE (GIỮ NGUYÊN TỪ TABULAR) ---
-  minio:
-    image: minio/minio
-    container_name: minio
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-    networks:
-      iceberg_net:
-        aliases:
-          - warehouse.minio
-    ports:
-      - 9001:9001
-      - 9000:9000
-    command: ["server", "/data", "--console-address", ":9001"]
-
-  mc:
+  # 6. Spark Iceberg Lab (Optional - Cho Notebooks)
+  spark-iceberg:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-iceberg
     depends_on:
       - minio
-    image: minio/mc
-    container_name: mc
-    networks:
-      - iceberg_net
+      - hive-metastore
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - MINIO_LAKEHOUSE_ACCESS_KEY=${MINIO_LAKEHOUSE_ACCESS_KEY}
-      - MINIO_LAKEHOUSE_SECRET_KEY=${MINIO_LAKEHOUSE_SECRET_KEY}
-    entrypoint: >
-      /bin/sh -c "
-      until (/usr/bin/mc alias set minio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}) do echo '...waiting...' && sleep 1; done;
-      /usr/bin/mc mb -p minio/warehouse;
-      /usr/bin/mc mb -p minio/hospital-lakehouse;
-      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/raw/.keep;
-      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/bronze/.keep;
-      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/silver/.keep;
-      echo '' | /usr/bin/mc pipe minio/hospital-lakehouse/gold/.keep;
-      /usr/bin/mc admin user add minio $${MINIO_LAKEHOUSE_ACCESS_KEY} $${MINIO_LAKEHOUSE_SECRET_KEY};
-      /usr/bin/mc admin policy attach minio readwrite --user $${MINIO_LAKEHOUSE_ACCESS_KEY};
-      tail -f /dev/null
-      "
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-lakehouse_admin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+      - AWS_REGION=us-east-1
+      - SPARK_CONF_spark_sql_catalog_hospital=org.apache.iceberg.spark.SparkCatalog
+      - SPARK_CONF_spark_sql_catalog_hospital_catalog-impl=org.apache.iceberg.hive.HiveCatalog
+      - SPARK_CONF_spark_sql_catalog_hospital_uri=thrift://hive-metastore:9083
+      - SPARK_CONF_spark_sql_catalog_hospital_warehouse=s3a://hospital-lakehouse/warehouse
+      - SPARK_CONF_spark_hadoop_fs_s3a_endpoint=http://minio:9000
+      - SPARK_CONF_spark_hadoop_fs_s3a_path_style_access=true
+    networks:
+      - lakehouse_net
+    ports:
+      - "8888:8888"
+      - "4040:4040"
+    volumes:
+      - ./notebooks:/home/iceberg/notebooks
 
 networks:
-  iceberg_net:
+  lakehouse_net:
+    name: lakehouse_net
+
+volumes:
+  airflow_data:
