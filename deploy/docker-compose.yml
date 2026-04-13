@@ -51,8 +51,10 @@ services:
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-lakehouse_admin}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+      - MINIO_LAKEHOUSE_ACCESS_KEY=${MINIO_LAKEHOUSE_ACCESS_KEY:-lakehouse_admin}
+      - MINIO_LAKEHOUSE_SECRET_KEY=${MINIO_LAKEHOUSE_SECRET_KEY:-Lakehouse123!}
     entrypoint: >
-      /bin/sh -c " /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; /usr/bin/mc mb -p local/hospital-lakehouse; /usr/bin/mc mb -p local/hospital-lakehouse/raw; /usr/bin/mc mb -p local/hospital-lakehouse/warehouse; exit 0; "
+      /bin/sh -c " /usr/bin/mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD}; /usr/bin/mc mb -p local/hospital-lakehouse || true; /usr/bin/mc mb -p local/hospital-lakehouse/raw || true; /usr/bin/mc mb -p local/hospital-lakehouse/bronze || true; /usr/bin/mc mb -p local/hospital-lakehouse/silver || true; /usr/bin/mc mb -p local/hospital-lakehouse/gold || true; /usr/bin/mc mb -p local/hospital-lakehouse/warehouse || true; /usr/bin/mc admin user add local $${MINIO_LAKEHOUSE_ACCESS_KEY} $${MINIO_LAKEHOUSE_SECRET_KEY} || true; /usr/bin/mc admin policy attach local readwrite --user $${MINIO_LAKEHOUSE_ACCESS_KEY} || true; exit 0; "
 
   # 4. Hive Metastore - Quản lý Metadata cho Iceberg
   metastore-db:
@@ -65,7 +67,7 @@ services:
     networks:
       - lakehouse_net
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "metastore", "-d", "metastore_db" ]
+      test: [ "CMD", "pg_isready", "-U", "${DB_METASTORE_USER:-metastore}", "-d", "${DB_METASTORE_NAME:-metastore_db}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -73,6 +75,7 @@ services:
   hive-metastore:
     image: tabulario/hive-metastore:latest
     container_name: hive-metastore
+    entrypoint: ["/bin/sh", "-c", "sed -i 's#/opt/hive/bin/hiveserver2#/opt/hive/bin/hive --service metastore#g' /app/run.sh; /app/run.sh"]
     depends_on:
       metastore-db:
         condition: service_healthy
@@ -162,6 +165,22 @@ services:
       - "4040:4040"
     volumes:
       - ./notebooks:/home/iceberg/notebooks
+
+  # 7. Trino - SQL Serving Layer
+  trino:
+    image: trinodb/trino:480
+    container_name: trino
+    depends_on:
+      minio:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_started
+    networks:
+      - lakehouse_net
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./trino/catalog:/etc/trino/catalog
 
 networks:
   lakehouse_net:
