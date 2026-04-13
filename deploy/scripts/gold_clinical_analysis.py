@@ -23,7 +23,8 @@ def build_spark() -> SparkSession:
     return (
         SparkSession.builder.appName("Iceberg Gold Clinical Analytics")
         .config("spark.sql.catalog.hospital", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.hospital.type", "hadoop")
+        .config("spark.sql.catalog.hospital.type", "hive")
+        .config("spark.sql.catalog.hospital.uri", "thrift://hive-metastore:9083")
         .config("spark.sql.catalog.hospital.warehouse", "s3a://hospital-lakehouse/warehouse")
         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
         .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY)
