@@ -15,7 +15,11 @@ services:
       - ./postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
       - ../data:/data_source
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${DB_SOURCE_USER:-admin} -d ${DB_SOURCE_NAME:-hospital_db}" ]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_SOURCE_USER:-admin} -d ${DB_SOURCE_NAME:-hospital_db}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -34,7 +38,7 @@ services:
       - "9001:9001"
     command: server /data --console-address ":9001"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -67,7 +71,15 @@ services:
     networks:
       - lakehouse_net
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "${DB_METASTORE_USER:-metastore}", "-d", "${DB_METASTORE_NAME:-metastore_db}" ]
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "${DB_METASTORE_USER:-metastore}",
+          "-d",
+          "${DB_METASTORE_NAME:-metastore_db}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -75,7 +87,12 @@ services:
   hive-metastore:
     image: tabulario/hive-metastore:latest
     container_name: hive-metastore
-    entrypoint: ["/bin/sh", "-c", "sed -i 's#/opt/hive/bin/hiveserver2#/opt/hive/bin/hive --service metastore#g' /app/run.sh; /app/run.sh"]
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "sed -i 's#/opt/hive/bin/hiveserver2#/opt/hive/bin/hive --service metastore#g' /app/run.sh; /app/run.sh",
+      ]
     depends_on:
       metastore-db:
         condition: service_healthy
@@ -182,9 +199,36 @@ services:
     volumes:
       - ./trino/catalog:/etc/trino/catalog
 
+  # 8. Superset - BI Dashboard Layer
+  superset:
+    build:
+      context: ./superset/docker
+      dockerfile: Dockerfile
+    container_name: superset
+    depends_on:
+      trino:
+        condition: service_started
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py
+      - SUPERSET_ADMIN_USERNAME=${SUPERSET_ADMIN_USERNAME:-admin}
+      - SUPERSET_ADMIN_PASSWORD=${SUPERSET_ADMIN_PASSWORD:-admin}
+      - SUPERSET_ADMIN_FIRSTNAME=${SUPERSET_ADMIN_FIRSTNAME:-Admin}
+      - SUPERSET_ADMIN_LASTNAME=${SUPERSET_ADMIN_LASTNAME:-User}
+      - SUPERSET_ADMIN_EMAIL=${SUPERSET_ADMIN_EMAIL:-admin@example.com}
+    networks:
+      - lakehouse_net
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./superset/config/superset_config.py:/app/pythonpath/superset_config.py
+      - ./superset/docker/superset_init.sh:/app/superset_init.sh
+      - superset_home:/app/superset_home
+    command: ["/bin/sh", "/app/superset_init.sh"]
+
 networks:
   lakehouse_net:
     name: lakehouse_net
 
 volumes:
   airflow_data:
+  superset_home:
