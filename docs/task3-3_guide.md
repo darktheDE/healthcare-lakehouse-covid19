@@ -8,6 +8,16 @@ Tài liệu này mô tả đúng cấu hình dashboard đã triển khai thành 
 - Cách tạo Virtual Dataset cho biểu đồ `COVID Pathway Distribution`.
 - Vì sao không thể dùng trực tiếp bảng Gold gốc để vẽ pie chart theo cách mong muốn.
 
+## 0. Import dashboard
+
+```
+docker cp docs/dashboard_export.zip superset:/tmp/dashboard.zip
+```
+
+```
+docker exec -it superset superset import-dashboards -p /tmp/dashboard.zip -u admin
+```
+
 ## 1. Mục tiêu Task 3.3
 
 - Dùng dữ liệu Gold trong catalog `iceberg` để trực quan hóa.
