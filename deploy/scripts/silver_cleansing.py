@@ -290,8 +290,11 @@ def main() -> None:
     )
 
     print(f"[INFO] COVID clinical master rows: {covid_clinical_master.count()}")
-    print(f"[INFO] Writing target table: {OUTPUT_TABLE}")
     
+    print(f"[INFO] Writing Silver tables...")
+    patients_clean.writeTo(f"{SILVER_NAMESPACE}.patients").createOrReplace()
+    encounters_clean.writeTo(f"{SILVER_NAMESPACE}.encounters").createOrReplace()
+    conditions_clean.writeTo(f"{SILVER_NAMESPACE}.conditions").createOrReplace()
     covid_clinical_master.writeTo(OUTPUT_TABLE).createOrReplace()
 
     print("[DONE] Silver table enrichment completed successfully.")
