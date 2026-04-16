@@ -155,7 +155,7 @@ services:
       - ../jars:/opt/spark/jars
       - ../data:/data_source
     ports:
-      - "8080:8080"
+      - "8082:8080"
     command: standalone
 
   # 6. Spark Iceberg Lab (Optional - Cho Notebooks)
@@ -182,6 +182,74 @@ services:
       - "4040:4040"
     volumes:
       - ./notebooks:/home/iceberg/notebooks
+
+  # 6.5 Spark One-off Jobs (Medallion Pipeline)
+  spark-raw-job:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-raw-job
+    depends_on:
+      - minio
+      - postgres-source
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-lakehouse_admin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+      - PG_HOST=postgres-source
+      - PG_USER=${DB_SOURCE_USER:-admin}
+      - PG_PASSWORD=${DB_SOURCE_PASSWORD:-password}
+      - MINIO_ENDPOINT=http://minio:9000
+    networks:
+      - lakehouse_net
+    volumes:
+      - ../spark_jobs:/opt/spark/scripts
+    command: spark-submit --master local[*] --packages org.postgresql:postgresql:42.6.0 /opt/spark/scripts/postgres_to_raw.py
+
+  spark-bronze-job:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-bronze-job
+    depends_on:
+      - minio
+      - hive-metastore
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-lakehouse_admin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+      - MINIO_ENDPOINT=http://minio:9000
+    networks:
+      - lakehouse_net
+    volumes:
+      - ../spark_jobs:/opt/spark/scripts
+    command: spark-submit --master local[*] /opt/spark/scripts/bronze_ingestion.py
+
+  spark-silver-job:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-silver-job
+    depends_on:
+      - minio
+      - hive-metastore
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-lakehouse_admin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+      - MINIO_ENDPOINT=http://minio:9000
+    networks:
+      - lakehouse_net
+    volumes:
+      - ../spark_jobs:/opt/spark/scripts
+    command: spark-submit --master local[*] /opt/spark/scripts/silver_cleansing.py
+
+  spark-gold-job:
+    image: tabulario/spark-iceberg:latest
+    container_name: spark-gold-job
+    depends_on:
+      - minio
+      - hive-metastore
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-lakehouse_admin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-Lakehouse123!}
+      - MINIO_ENDPOINT=http://minio:9000
+    networks:
+      - lakehouse_net
+    volumes:
+      - ../spark_jobs:/opt/spark/scripts
+    command: spark-submit --master local[*] /opt/spark/scripts/gold_aggregation.py
 
   # 7. Trino - SQL Serving Layer
   trino:

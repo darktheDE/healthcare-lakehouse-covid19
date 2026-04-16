@@ -5,6 +5,23 @@
 
 ## 1. Setup & Chạy dự án
 
+### Cách chạy nhanh (Automated Script) - KHUYÊN DÙNG
+Chúng tôi đã tích hợp script tự động để cài đặt từ A-Z (Tải dữ liệu, bật hạ tầng, chạy pipeline và xuất kết quả minh chứng).
+
+**Trên Linux / Mac / WSL (Git Bash):**
+```bash
+chmod +x execute_pipeline.sh
+./execute_pipeline.sh
+```
+
+**Trên Windows (PowerShell):**
+```powershell
+.\execute_pipeline.ps1
+```
+
+---
+
+### Cách chạy thủ công từng bước (Manual)
 1. Clone repository về máy:
    ```bash
    git clone https://github.com/darktheDE/healthcare-lakehouse-covid19.git

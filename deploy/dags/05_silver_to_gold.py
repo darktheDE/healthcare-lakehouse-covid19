@@ -26,3 +26,13 @@ with DAG(
         packages=ICEBERG_PACKAGES,
         name='silver_to_iceberg_gold'
     )
+
+    aggregate_gold = SparkSubmitOperator(
+        task_id='aggregate_to_gold',
+        application='/opt/spark/scripts/gold_aggregation.py',
+        conn_id='spark_default',
+        packages=ICEBERG_PACKAGES,
+        name='silver_to_iceberg_gold_agg'
+    )
+
+    analyze_gold >> aggregate_gold
