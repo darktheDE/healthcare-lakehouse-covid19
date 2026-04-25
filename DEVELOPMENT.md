@@ -1,25 +1,8 @@
 # Development Guide
 
 ## 0. Link datasource: https://mitre.box.com/shared/static/wk3560f962ozlg7sd2oj1zxk73ayqvm0.zip
-==> down về bỏ vào folder /data
+==> Download tại /data
 
-## 1. Setup & Chạy dự án
-
-### Cách chạy nhanh (Automated Script) - KHUYÊN DÙNG
-Chúng tôi đã tích hợp script tự động để cài đặt từ A-Z (Tải dữ liệu, bật hạ tầng, chạy pipeline và xuất kết quả minh chứng).
-
-**Trên Linux / Mac / WSL (Git Bash):**
-```bash
-chmod +x execute_pipeline.sh
-./execute_pipeline.sh
-```
-
-**Trên Windows (PowerShell):**
-```powershell
-.\execute_pipeline.ps1
-```
-
----
 
 ### Cách chạy thủ công từng bước (Manual)
 1. Clone repository về máy:
@@ -91,9 +74,6 @@ chmod +x execute_pipeline.sh
 3. Reviewer kiểm tra code và duyệt qua.
 4. Quản lý repo tiến hành Merge PR khi hoàn tất review 3 bên.
 
-**Lịch Họp:**
-* Họp nhóm 2 ngày/buổi, vào **22h30 mỗi tối**.
-
 ## 3. Quy tắc đặt tên
 
 ### Nhánh (Branch)
@@ -109,19 +89,3 @@ chmod +x execute_pipeline.sh
 * `chore:` - Tooling, setup no production code change
 
 ---
-
-## 4. Tổng quan Hệ thống Tự Động (Kiến trúc Medallion Lakehouse)
-
-* **Processing (Apache Iceberg & Spark):** Hệ thống không còn dùng file CSV trung gian kém hiệu quả. Dữ liệu từ Postgres được Spark "nuốt" trực tiếp qua JDBC thành định dạng **Parquet** (Raw Layer), sau đó được chuyển đổi chuẩn thành **Table Iceberg** (Bronze Layer) thông qua các job container tự động.
-* **SQL Engine (Trino):** Cung cấp khả năng truy vấn dữ liệu Big Data tức thì trên lớp Bronze, Silver, Gold thông qua cổng 8081. Đã được cấu hình chuẩn `fs.native-s3` cho Trino 480+.
-
-## 5. Hướng Dẫn Tác Chiến Của Maintainer Tương Lai
-
-**Trạng thái tính đến nay (Task 1.2 -> 1.5):** 
-Hạ tầng Core Lakehouse đã quá xuất sắc. Tệp cấu hình cực sạch ở `.env`, không lộ Secret, dòng chảy **Postgres -> Parquet (Raw) -> Iceberg (Bronze)** đã tự động hóa 100%. Đã kiểm chứng 4.4 triệu bản ghi sẵn sàng để xử lý tiếp.
-
-**Việc tiếp theo của các Maintainers:**
-1. Đọc và lấy cảm hứng kĩ thuật để phân tích kiến trúc qua `docs/project_architecture_roadmap.md` và `docs/task..._guide.md`.
-2. **Triển Khai Mạng Lưới Silver Layer:** Thiết lập xử lý Spark lọc Nhiễu, xử lý Cột Trống, ép kiểu tiền tệ sang `DECIMAL(18, 2)`, thực hiện phân vùng (Partitioning) theo `event_month` trong Iceberg nhằm tăng tốc truy vấn.
-3. **Orchestration Airflow:** Trưởng thành hóa dòng chảy BATCH PIPELINE bằng việc kích hoạt các **Apache Airflow DAG** để điều phối toàn bộ job Spark theo chu kỳ tự động.
-4. **Data Visualization:** Cắm các công cụ BI (Superset, Metabase, Tableau) vào Trino để báo cáo dữ liệu.

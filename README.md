@@ -4,6 +4,9 @@
 [![Architecture](https://img.shields.io/badge/Architecture-Medallion-orange)](https://github.com/darktheDE/healthcare-lakehouse-covid19)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/darktheDE/healthcare-lakehouse-covid19)
 
+![System Architecture](docs/system-arch.jpg)
+![Main Dashboard](docs/main-dashboard.jfif)
+
 ## Project Overview
 This project implements a professional **End-to-End Data Lakehouse** solution designed to process and analyze large-scale healthcare data, specifically focused on **COVID-19 patient records**. 
 
@@ -26,9 +29,6 @@ The architecture follows the **Modern Data Stack** pattern:
 4.  **Processing Layer:** `Apache Spark` handles the Medallion ETL pipeline.
 5.  **Serving Layer:** `Trino` provides a distributed SQL interface.
 6.  **Analytics & Consumption:** `Apache Superset` (BI) and `FastAPI` (Data-as-a-Service).
-
-
-![System Architecture](docs/system-arch.jpg)
 
 ---
 
@@ -120,12 +120,16 @@ Access processed insights programmatically:
 ---
 
 ## Contributors
-This project was developed by **Team 01 (BDAN-HCMUTE)** using the Agile/Scrum methodology.
+This project was developed by **Team 01 (BDAN-HCMUTE)**.
 
-*   **Đỗ Kiến Hưng (DE):** Infrastructure, Airflow Orchestration, Bronze Spark Job.
-*   **Nguyễn Văn Quang Duy (DE):** Silver Spark Job, Trino Optimization, Superset Dashboards.
-*   **Phan Trọng Quí (BE):** Docker Setup, PostgreSQL Source, Gold Spark Job (Revenue), FastAPI.
-*   **Phan Trọng Phú (BE):** MinIO Setup, Gold Spark Job (Trends), FastAPI.
+| STT | Student ID | Full Name | Contributions |
+| :--- | :--- | :--- | :--- |
+| 1 | 23110086 | Nguyễn Văn Quang Duy | - Apache Iceberg – Table format<br>- Trino – Distributed SQL query engine<br>- Hive Metastore<br>- Apache Superset<br>- Data cleaning and data type normalization<br>- Data analysis and visualization using Trino and Apache Superset |
+| 2 | 23133030 | Đỗ Kiến Hưng | - Medallion Architecture overview<br>- Decoupled Storage & Compute architecture design<br>- Data Flow/Pipeline process<br>- Synthea COVID-19 Dataset introduction<br>- Gold Layer: Metrics Aggregation & COVID-19 Analytics |
+| 3 | 23133056 | Phan Trọng Phú | - Apache Spark - Distributed data processing<br>- Apache Airflow - Workflow orchestration<br>- Containerized infrastructure with Docker Compose<br>- Scheduling environment setup with Apache Airflow<br>- Gold Layer: Metrics Aggregation & COVID-19 Analytics<br>- Process automation with Airflow DAGs |
+| 4 | 23133061 | Phan Trọng Qui | - MinIO - S3 compatible object storage<br>- PostgreSQL Source database management system<br>- PostgreSQL Source Database installation and configuration<br>- Data Lake configuration with MinIO and Hive Metastore<br>- Ingestion: Data extraction from PostgreSQL to Bronze layer |
+
+**Contribution Proof:** [Plane Task Evidence](https://sites.plane.so/issues/b18b3636a9c44636aea91add184a8ed9)
 
 ---
 
