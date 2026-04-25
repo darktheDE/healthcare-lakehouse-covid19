@@ -6,6 +6,8 @@ MINIO_ENDPOINT   = os.getenv("MINIO_ENDPOINT",   "http://minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "lakehouse_admin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "Lakehouse123!")
 
+
+
 def build_spark() -> SparkSession:
     return (
         SparkSession.builder
@@ -27,21 +29,26 @@ def build_spark() -> SparkSession:
         .getOrCreate()
     )
 
+
 def write_iceberg(df, table: str, spark: SparkSession):
     """
     Ghi DataFrame vào Iceberg table.
     - Nếu table đã tồn tại: overwrite toàn bộ dữ liệu.
     - Nếu chưa tồn tại: tạo mới.
+    Không dùng DROP TABLE để tránh lỗi metadata khi createOrReplace.
     """
+    # Thử createOrReplace trực tiếp (không DROP trước)
     try:
         df.writeTo(table).using("iceberg").createOrReplace()
     except Exception as e:
         print(f"[WARN] createOrReplace failed ({e}), thử write.format overwrite...")
+        # Fallback: ghi bằng DataFrameWriter với format iceberg
         df.write \
           .format("iceberg") \
           .mode("overwrite") \
           .option("overwrite-mode", "dynamic") \
           .saveAsTable(table)
+
 
 def main():
     print("🚀 Bắt đầu khởi tạo SparkSession...")
@@ -50,7 +57,6 @@ def main():
 
     print("✅ Đã kết nối Spark. Tiến hành đọc dữ liệu Raw (Parquet) từ MinIO...")
     try:
-        # Đường dẫn tới các tệp Parquet trong MinIO
         patients_df   = spark.read.parquet("s3a://hospital-lakehouse/raw/patients")
         encounters_df = spark.read.parquet("s3a://hospital-lakehouse/raw/encounters")
         conditions_df = spark.read.parquet("s3a://hospital-lakehouse/raw/conditions")
@@ -58,10 +64,9 @@ def main():
         p_count = patients_df.count()
         e_count = encounters_df.count()
         c_count = conditions_df.count()
-        print(f"📊 Thống kê nguồn: Patients({p_count}), Encounters({e_count}), Conditions({c_count})")
+        print(f"📊 Thống kê: Patients({p_count}), Encounters({e_count}), Conditions({c_count})")
     except Exception as e:
-        print("❌ Lỗi đọc dữ liệu Raw từ MinIO. Hãy đảm bảo job postgres_to_raw đã chạy thành công.")
-        print("Chi tiết lỗi:", str(e))
+        print("❌ Lỗi đọc raw từ MinIO:", str(e))
         spark.stop()
         return
 
@@ -82,6 +87,7 @@ def main():
 
     print("🎉 Hoàn tất quá trình Ingestion vào lớp Bronze!")
     spark.stop()
+
 
 if __name__ == "__main__":
     main()

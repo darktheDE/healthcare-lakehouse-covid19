@@ -46,7 +46,7 @@ coverage.xml
 .python-version
 
 # Environments
-.env
+# .env
 .venv
 env/
 venv/
@@ -72,3 +72,6 @@ logs/
 # MinIO / Iceberg local storage (if any)
 warehouse/
 minio_data/
+
+data/*.csv
+*.log
